@@ -2,19 +2,315 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8" />
-  <title>Beat ’em up Demo</title>
+  <title>Beat 'em Up Demo</title>
   <style>
-    body { margin: 0; background: #222; /* фон сторінки */ }
+    body { margin: 0; background: #222; }
     canvas { display: block; margin: 20px auto; background: #555; }
   </style>
 </head>
 <body>
-  <!-- Полотно для гри -->
   <canvas id="gameCanvas" width="800" height="600"></canvas>
-
-  <!-- Скрипт гри -->
   <script>
-    // Тут буде JavaScript-код гри
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Стан гри
+    let gameState = 'menu';      // 'menu', 'playing', 'gameover', 'win'
+    let level = 1;
+    let score = 0;
+    let soundOn = true;
+
+    // Об'єкт гравця
+    const player = {
+      x: 100, y: 500,
+      width: 40, height: 40,
+      speed: 200,          // пікселів за секунду
+      health: 100,
+      facing: 'right'      // напрямок, куди "дивиться" гравець
+    };
+
+    let enemies = [];            // масив ворогів на поточному рівні
+    let currentLevelBg = '#5a8f7b';  // колір фону рівня (змінюється в loadLevel)
+
+    // Завантаження звуку (фонова музика)
+    const bgMusic = new Audio('bgmusic.mp3');
+    bgMusic.loop = true;
+    bgMusic.volume = 0.5;
+    // *Примітка:* Автоматичне відтворення може бути заблоковане браузером.
+    //   Ми запускаємо музику лише після дії користувача (натиснення Enter).
+    
+    // Відстеження натиснутих клавіш
+    const keysDown = {};
+    window.addEventListener('keydown', function(e) {
+      const key = e.code;
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(key)) {
+        e.preventDefault();  // відміняємо прокрутку сторінки стрілками/пробілом
+      }
+      if (gameState === 'menu') {
+        if (key === 'Enter') {
+          startGame();
+        } else if (key === 'KeyM') {
+          toggleSound();
+        } else if (key === 'Escape') {
+          exitGame();
+        }
+      } else if (gameState === 'playing') {
+        if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(key)) {
+          keysDown[key] = true;
+        }
+        if (key === 'Space') {
+          playerAttack();
+        }
+        if (key === 'Escape') {
+          // достроковий вихід до меню
+          gameState = 'menu';
+          bgMusic.pause();
+        }
+      } else if ((gameState === 'gameover') || (gameState === 'win')) {
+        if (key === 'Enter') {
+          gameState = 'menu';
+          bgMusic.pause();
+        }
+      }
+    });
+    window.addEventListener('keyup', function(e) {
+      const key = e.code;
+      if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(key)) {
+        delete keysDown[key];
+      }
+    });
+
+    // Функція перевірки зіткнення двох прямокутників
+    function isColliding(a, b) {
+      return (a.x < b.x + b.width &&
+              a.x + a.width > b.x &&
+              a.y < b.y + b.height &&
+              a.y + a.height > b.y);
+    }
+
+    // Функція створення нового ворога
+    function spawnEnemy(x, y) {
+      return {
+        x: x, y: y,
+        width: 40, height: 40,
+        speed: 100,    // швидкість руху ворога
+        health: 50,    // здоров'я ворога
+        damage: 20     // шкода гравцю за 1 секунду контакту
+      };
+    }
+
+    // Завантаження рівня: розміщуємо ворогів, встановлюємо фон
+    function loadLevel(num) {
+      level = num;
+      enemies = [];
+      // Позиція гравця на старті рівня
+      player.x = 100;
+      player.y = 500;
+      if (level === 1) {
+        player.health = 100;
+        score = 0;
+      }
+      // Встановлюємо фон (колір) рівня
+      if (level === 1) currentLevelBg = '#5a8f7b';
+      if (level === 2) currentLevelBg = '#7b5a8f';
+      // Створення ворогів на рівні
+      if (level === 1) {
+        enemies.push(spawnEnemy(600, 500));
+        enemies.push(spawnEnemy(700, 400));
+        enemies.push(spawnEnemy(650, 300));
+      } else if (level === 2) {
+        enemies.push(spawnEnemy(500, 500));
+        enemies.push(spawnEnemy(750, 500));
+        enemies.push(spawnEnemy(750, 300));
+        enemies.push(spawnEnemy(500, 200));
+        enemies.push(spawnEnemy(650, 100));
+      }
+    }
+
+    // Оновлення логіки гри (рух, зіткнення)
+    function updateGame(dt) {
+      // Рух гравця
+      if (keysDown['ArrowLeft']) {
+        player.x -= player.speed * dt;
+        player.facing = 'left';
+      }
+      if (keysDown['ArrowRight']) {
+        player.x += player.speed * dt;
+        player.facing = 'right';
+      }
+      if (keysDown['ArrowUp']) {
+        player.y -= player.speed * dt;
+      }
+      if (keysDown['ArrowDown']) {
+        player.y += player.speed * dt;
+      }
+      // Обмеження руху гравця межами canvas
+      if (player.x < 0) player.x = 0;
+      if (player.x + player.width > canvas.width) {
+        player.x = canvas.width - player.width;
+      }
+      if (player.y < 0) player.y = 0;
+      if (player.y + player.height > canvas.height) {
+        player.y = canvas.height - player.height;
+      }
+
+      // Рух ворогів (прямо до гравця)
+      for (let enemy of enemies) {
+        if (enemy.x < player.x) {
+          enemy.x += enemy.speed * dt;
+        } else if (enemy.x > player.x) {
+          enemy.x -= enemy.speed * dt;
+        }
+        if (enemy.y < player.y) {
+          enemy.y += enemy.speed * dt;
+        } else if (enemy.y > player.y) {
+          enemy.y -= enemy.speed * dt;
+        }
+      }
+
+      // Перевірка зіткнень ворогів з гравцем (ворог б'є гравця)
+      for (let enemy of enemies) {
+        if (isColliding(player, enemy)) {
+          player.health -= enemy.damage * dt;
+          if (player.health <= 0) {
+            player.health = 0;
+            gameState = 'gameover';
+            bgMusic.pause();
+          }
+        }
+      }
+    }
+
+    // Обробка атаки гравця
+    function playerAttack() {
+      for (let i = 0; i < enemies.length; i++) {
+        const enemy = enemies[i];
+        if (isColliding(player, enemy)) {
+          // завдаємо шкоди ворогу
+          enemy.health -= 50;
+          // відкидаємо ворога трохи назад
+          if (player.facing === 'right') {
+            enemy.x += 20;
+          } else {
+            enemy.x -= 20;
+          }
+          if (enemy.health <= 0) {
+            score += 10;
+            enemies.splice(i, 1);
+            i--;
+          }
+        }
+      }
+      // Якщо всі вороги знищені, перейти на наступний рівень або виграш
+      if (enemies.length === 0) {
+        if (level < 2) {
+          loadLevel(level + 1);
+        } else {
+          gameState = 'win';
+          bgMusic.pause();
+        }
+      }
+    }
+
+    // Відмалювання усього кадру залежно від стану гри
+    function renderGame() {
+      if (gameState === 'playing') {
+        // Фон рівня
+        ctx.fillStyle = currentLevelBg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Гравець
+        ctx.fillStyle = '#3498db';
+        ctx.fillRect(player.x, player.y, player.width, player.height);
+        // Вороги
+        ctx.fillStyle = '#e74c3c';
+        for (let enemy of enemies) {
+          ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+        }
+        // Текстова інформація (UI)
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '18px Arial';
+        ctx.fillText(`Очки: ${score}`, 10, 20);
+        ctx.fillText(`Здоров'я: ${Math.floor(player.health)}`, 10, 40);
+        ctx.fillText(`Рівень: ${level}`, 10, 60);
+      }
+      // Екран меню
+      if (gameState === 'menu') {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = '28px Arial';
+        ctx.fillText('DEMO: Beat \'em Up', canvas.width/2, canvas.height/2 - 60);
+        ctx.font = '20px Arial';
+        ctx.fillText('Натисніть Enter, щоб розпочати гру', canvas.width/2, canvas.height/2);
+        ctx.fillText(`Звук: ${soundOn ? 'On (M щоб вимкнути)' : 'Off (M щоб увімкнути)'}`, 
+                     canvas.width/2, canvas.height/2 + 30);
+        ctx.fillText('Esc – Вихід', canvas.width/2, canvas.height/2 + 60);
+        ctx.textAlign = 'left';
+      }
+      // Екран Game Over
+      if (gameState === 'gameover') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = '30px Arial';
+        ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2 - 20);
+        ctx.font = '20px Arial';
+        ctx.fillText(`Ваш результат: ${score} очок`, canvas.width/2, canvas.height/2 + 10);
+        ctx.fillText('Enter – повернутися до меню', canvas.width/2, canvas.height/2 + 40);
+        ctx.textAlign = 'left';
+      }
+      // Екран You Win
+      if (gameState === 'win') {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#000';
+        ctx.textAlign = 'center';
+        ctx.font = '30px Arial';
+        ctx.fillText('YOU WIN!', canvas.width/2, canvas.height/2 - 20);
+        ctx.font = '20px Arial';
+        ctx.fillText('Вітаємо, ви пройшли гру!', canvas.width/2, canvas.height/2 + 10);
+        ctx.fillText('Enter – повернутися в меню', canvas.width/2, canvas.height/2 + 40);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    // Функції управління грою
+    function startGame() {
+      loadLevel(1);
+      gameState = 'playing';
+      if (soundOn) {
+        bgMusic.currentTime = 0;
+        bgMusic.play();
+      }
+    }
+    function toggleSound() {
+      soundOn = !soundOn;
+      if (!soundOn) {
+        bgMusic.pause();
+      } else {
+        bgMusic.play();
+      }
+    }
+    function exitGame() {
+      bgMusic.pause();
+      alert('Гру завершено. Натисніть OK, щоб перезапустити.');
+      document.location.reload();
+    }
+
+    // Головний ігровий цикл
+    let lastTime = performance.now();
+    function gameLoop(time) {
+      const dt = (time - lastTime) / 1000;
+      lastTime = time;
+      if (gameState === 'playing') {
+        updateGame(dt);
+      }
+      renderGame();
+      requestAnimationFrame(gameLoop);
+    }
+    requestAnimationFrame(gameLoop);
   </script>
 </body>
 </html>
